@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DYPSA — Todos</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.header{background:#1e293b;padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #334155;flex-shrink:0}
+.header h1{font-size:15px;font-weight:700;flex:1}
+.badge{background:#16a34a;color:white;font-size:11px;padding:2px 8px;border-radius:20px}
+.back-btn{background:#334155;border:none;color:#e2e8f0;padding:6px 12px;border-radius:6px;font-size:13px;cursor:pointer;display:none;align-items:center;gap:6px}
+.back-btn.visible{display:flex}
+.content{flex:1;display:flex;overflow:hidden}
+#list-view{width:100%;overflow-y:auto;background:#0f172a}
+.device{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #1e293b;cursor:pointer}
+.device:hover{background:#1e293b}
+.dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+.dot.fresh{background:#22c55e}.dot.old{background:#f59e0b}.dot.stale{background:#ef4444}
+.device-info{flex:1}
+.device-name{font-size:14px;font-weight:600;color:#f1f5f9}
+.device-time{font-size:12px;color:#64748b;margin-top:2px}
+.device-loc{font-size:11px;color:#475569;margin-top:1px}
+.arrow{color:#475569;font-size:18px}
+.empty{padding:40px 20px;text-align:center;color:#475569;font-size:14px;line-height:1.8}
+.section-header{padding:10px 16px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #1e293b}
+#map-view{width:100%;height:100%;display:none;position:relative}
+#map{width:100%;height:100%}
+.map-info{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);background:#1e293b;border-radius:10px;padding:10px 16px;font-size:13px;z-index:1000;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.4);white-space:nowrap}
+@media(min-width:768px){#list-view{width:300px;border-right:1px solid #334155;flex-shrink:0}#map-view{display:flex!important;flex:1}.back-btn{display:none!important}}
+</style>
+</head>
+<body>
+<div class="header">
+  <button class="back-btn" id="back-btn" onclick="showList()">← Lista</button>
+  <h1>📍 DYPSA Tracker</h1>
+  <span class="badge" id="badge">0 activos</span>
+  <button onclick="loadData()" style="background:#334155;border:none;color:#94a3b8;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;margin-left:auto">🔄</button>
+</div>
+<div class="content">
+  <div id="list-view"><div class="empty">Cargando…</div></div>
+  <div id="map-view"><div id="map"></div><div class="map-info" id="map-info" style="display:none"><div style="font-weight:700" id="mi-name"></div><div style="color:#64748b;font-size:11px" id="mi-time"></div></div></div>
+</div>
+<script>
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyKWiA0QCFmwYt2AJ9e0bwR6bYG6rbCOjDKLXWWyHohJNQwG_jadZAPNo6O5gy05Tlp/exec';
+let map, markers = {}, isMobile = window.innerWidth < 768;
+
+function initMap() {
+  map = L.map('map').setView([-34.6,-58.4],12);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{attribution:'© CartoDB'}).addTo(map);
+}
+function dotClass(ts){if(!ts)return 'stale';const m=(Date.now()-new Date(ts))/60000;return m<10?'fresh':m<30?'old':'stale';}
+function dotColor(c){return c==='fresh'?'#22c55e':c==='old'?'#f59e0b':'#ef4444';}
+function ageText(ts){if(!ts)return 'Sin datos';const m=Math.floor((Date.now()-new Date(ts))/60000);if(m<1)return 'Hace menos de 1 min';if(m<60)return 'Hace '+m+' min';return 'Hace '+Math.floor(m/60)+'h '+(m%60)+'min';}
+function showList(){document.getElementById('list-view').style.display='block';if(isMobile)document.getElementById('map-view').style.display='none';document.getElementById('back-btn').classList.remove('visible');}
+function showMap(loc){
+  document.getElementById('map-view').style.display='flex';
+  if(isMobile){document.getElementById('list-view').style.display='none';document.getElementById('back-btn').classList.add('visible');}
+  setTimeout(()=>{map.invalidateSize();map.setView([loc.lat,loc.lng],15);if(markers[loc.email])markers[loc.email].openPopup();document.getElementById('mi-name').textContent=loc.email.split('@')[0];document.getElementById('mi-time').textContent=ageText(loc.timestamp);document.getElementById('map-info').style.display='block';},100);
+}
+function renderList(locs){
+  document.getElementById('badge').textContent=locs.length+' activos';
+  const list=document.getElementById('list-view');
+  if(!locs.length){list.innerHTML='<div class="empty">Sin dispositivos conectados</div>';return;}
+  list.innerHTML='<div class="section-header">Dispositivos ('+locs.length+')</div>';
+  locs.forEach(loc=>{
+    if(!loc.lat||!loc.lng)return;
+    const dc=dotClass(loc.timestamp),name=loc.email.split('@')[0];
+    const div=document.createElement('div');div.className='device';
+    div.innerHTML='<div class="dot '+dc+'"></div><div class="device-info"><div class="device-name">'+name+'</div><div class="device-time">'+ageText(loc.timestamp)+'</div><div class="device-loc">'+parseFloat(loc.lat).toFixed(5)+', '+parseFloat(loc.lng).toFixed(5)+(String(loc.mock)==='1'?' <span style="color:#ef4444;font-size:10px">⚠️ GPS con posible mal funcionamiento</span>':'')+'</div></div><div class="arrow">›</div>';
+    div.onclick=()=>showMap(loc);list.appendChild(div);
+    const icon=L.divIcon({className:'',html:'<div style="background:'+dotColor(dc)+';width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>',iconSize:[14,14],iconAnchor:[7,7]});
+    if(markers[loc.email])markers[loc.email].setLatLng([loc.lat,loc.lng]).setIcon(icon);
+    else markers[loc.email]=L.marker([loc.lat,loc.lng],{icon}).addTo(map).bindPopup('<b>'+name+'</b><br>'+ageText(loc.timestamp));
+  });
+}
+async function loadData(){
+  try{
+    const r=await fetch(SCRIPT_URL+'?t='+Date.now());
+    const d=await r.json();
+    renderList(d.ubicaciones||[]);
+  }catch(e){
+    document.getElementById('list-view').innerHTML='<div class="empty">⚠️ Error de conexión<br><button onclick="loadData()" style="margin-top:12px;padding:8px 16px;background:#1d4ed8;border:none;border-radius:6px;color:white;cursor:pointer">Reintentar</button></div>';
+  }
+}
+initMap();loadData();setInterval(loadData,60000);
+window.addEventListener('resize',()=>{isMobile=window.innerWidth<768;});
+</script>
+</body>
+</html>
